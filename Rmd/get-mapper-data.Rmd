@@ -1,0 +1,101 @@
+---
+title: "Extract and Process Trial Data from PostGIS/Postgres"
+author: "Lyndon Estes"
+output:
+  html_document:
+    css: custom.css
+    highlight: tango
+    theme: spacelab
+    toc: yes
+---
+
+## Extract results from database
+
+From trial of DIYlandcover over South Africa in October, 2013.
+
+```{r, eval=FALSE, warning=FALSE}
+suppressMessages(library(rgeos))
+suppressMessages(library(sp))
+suppressMessages(library(RPostgreSQL))
+suppressMessages(library(rgdal))
+setwd("~/DIYlandcover")
+source("R/polyFromWkt.R")
+
+# Paths and connections
+drv <- dbDriver("PostgreSQL")
+# con <- dbConnect(drv, dbname = "db", user = "user", password = "pw")
+con <- dbConnect(drv, host = "db", port = 5432, dbname = "db", user = "user", 
+                 password = "pw")
+
+# First collect assignment data
+sql <- paste("select * from assignment_data")
+a_data <- dbGetQuery(con, sql) 
+
+# Collect kml_data to check which are QAQCs
+sql <- paste("select * from kml_data")
+kml_data <- dbGetQuery(con, sql)
+
+# Select hit_data
+sql <- paste("select * from hit_data")
+hit_data <- dbGetQuery(con, sql)
+
+# error data
+sql <- paste("SELECT * FROM qual_error_data")
+train_error_data <- dbGetQuery(con, sql)
+
+sql <- paste("SELECT * FROM error_data")
+error_data <- dbGetQuery(con, sql)
+
+# worker data
+sql <- paste("SELECT * FROM worker_data")
+worker_data <- dbGetQuery(con, sql)
+
+sql <- paste("SELECT * FROM qual_worker_data")
+train_worker_data <- dbGetQuery(con, sql)
+
+# Finally, training maps and training scores
+gcs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"  
+sql <- paste0("select name,ST_AsEWKT(geom),completion_time,training_id,try", 
+              " from qual_user_maps")
+train_geom <- dbGetQuery(con, sql)
+
+prjsrid <- 97490 
+sql <- paste0("select proj4text from spatial_ref_sys where srid=", prjsrid)
+prjstr <- dbGetQuery(con, sql)$proj4text
+
+sql <- paste0("SELECT name,ST_AsEWKT(geom),avail from sa1kgrid where name in ", 
+              "(", paste0("'", kml_data$correct_name, "'", collapse = ", "), 
+              ")")
+grid_geom <- dbGetQuery(con, sql)
+grid_geom[, 2] <- gsub("^SRID=*.*;", "", grid_geom[, 2])
+
+sql <- paste("select name,ST_AsEWKT(geom) from qaqcfields")
+qaqc_geom <- dbGetQuery(con, sql)
+qaqc_geom[, 2] <- gsub("^SRID=*.*;", "", qaqc_geom[, 2])
+
+sql <- paste("select name, ST_AsEWKT(geom),assignment_id,completion_time,",
+             "correct_name from user_maps")
+user_geom <- dbGetQuery(con, sql)
+user_geom[, 2] <- gsub("^SRID=*.*;", "", user_geom[, 2])
+```
+
+## Convert geometries to spatialPolygons 
+```{r, eval=FALSE}
+grids <- polyFromWkt(geom.tab = grid_geom, crs = prjstr)
+qflds <- polyFromWkt(geom.tab = qaqc_geom, crs = prjstr)
+uflds <- polyFromWkt(geom.tab = user_geom, crs = gcs)
+uflds <- spTransform(uflds, CRSobj = CRS(prjstr))
+uflds@data <- uflds@data[, "ID", drop = FALSE]
+```
+
+## And save
+```{r, eval = FALSE}
+keep <- c("name", "correct_name", "assignment_id", "completion_time")
+uflds@data <- sp::merge(uflds@data, user_geom[, keep], by.x = "ID", 
+                        sort = FALSE, by.y = "name", all = TRUE)
+objs <- c(ls()[grep("data", ls())], ls()[grep("geom", ls())], 
+          ls()[grep("flds", ls())], "grids", ls()[grep("prjstr", ls())])
+for(i in objs) save(list = i, file = paste0("data/", i, ".rda"))
+
+```
+

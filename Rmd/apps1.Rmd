@@ -1,0 +1,131 @@
+---
+title: "Appendix S1: Supplementary methods"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 2
+    number_sections: true
+    highlight: tango
+---
+
+# Accuracy of GTI cropland data layer
+
+The following describes an accuracy assessment of the GeoTerraImage (GTI) 2011 cropland data layer, which provided the inspiration for developing `DIYlandcover`, and the motivation for developing and testing the software over South Africa, under the aegis of the [Mapping Africa](http://mappingafrica.princeton.edu) project.
+
+## Accuracy assessment method
+
+We used the same 609 1 km$^2$ quality control (Q) sites described in the main text to conduct a modified accuracy assessment of the GTI data. The mapping rules for GTI were different than those used for [Mapping Africa](http://mappingafrica.princeton.edu), and included more categories of cropland. We therefore followed their inclusion criteria (e.g. they mapped orchards, fallow lands, and other categories that we excluded) in developing a reference for assessing the accuracy of GTI maps. We calculated the accuracy as follows: 
+
+   + We divided each 1 km$^2$ grid cell into 25 smaller cells of 200 X 200 m (4 ha)
+   + We visually assessed the extent to which fields (as defined by GTI's criteria) visible in underlying Google Maps imagery (accessed using the OpenLayers plug-in in QGIS) overlapped each 4 ha subcell, to the nearest 5% of coverage. This was achieved by overlaying a second grid of cells on each 4 ha sub-cell, and recording whether this cell was >50% (field present) or <50% occupied by a field (field absent).
+   + We also assessed, to the nearest 5%, how much of each sub-cell was covered by GTI's cropland polygons, and recorded where and how much the coverage agreed or disagreed with the reference.  
+   + From this, we calculated, first within each and then across all Q cells, the counts of true positives and negatives (TP and TN), and false positives and negatives (FP and FN): 
+       
+       
+    $$
+    \begin{aligned}
+    TP = \sum\limits_{Q=1}^{609}\sum\limits_{i=1}^{25}fT = 1 \wedge fR = 1 \\
+    FP = \sum\limits_{Q=1}^{609}\sum\limits_{i=1}^{25}fT = 1 \wedge fR = 0 \\
+    FN = \sum\limits_{Q=1}^{609}\sum\limits_{i=1}^{25}fT = 0 \wedge fR = 1 \\
+    TN = \sum\limits_{Q=1}^{609}\sum\limits_{i=1}^{25}fT = 0 \wedge fR = 0 \\
+    \end{aligned}
+    $$
+   
+    Where $f$ is the fraction (to the nearest 0.05) of each sub-cell $i$ in each quality control cell $Q$, $T$ is the test layer (the GTI cropland layer), $R$ is reference (the visually identified field), and 1 equals presence and 0 absence. 
+    
+  + From this, we were then able to calculate across all 609 test cells (15,225 subcells) sites the following accuracy measures: 
+  
+    $$
+    \begin{aligned}
+    Sensitivity = \frac{TP}{TP + FN} \\
+    \end{aligned}
+    $$
+
+
+    $$
+    \begin{aligned}
+    Specificity = \frac{TN}{FP + TN} \\
+    \end{aligned}
+    $$
+  
+    $$
+    \begin{aligned}
+    Accuracy = \frac{TP + TN}{TP + FP + FN + TN} \\
+    \end{aligned}
+    $$
+  
+    $$
+    \begin{aligned}
+    TSS = Sensitivity + Specificity - 1
+    \end{aligned}
+    $$
+  
+    With TSS being the True Skill Statistic (Allouche et al., 2006)
+
+\hyperlink{toc}{Back to top}
+
+## Statistics
+```{r}
+library(lmisc)
+library(readxl)
+library(data.table)
+proot <- "DIYlandcover-devel"
+setwd(full_path(proj_root(proot), proot)) 
+dat <- data.table(read_excel("external/ext_data/gti_accuracy_assessmentf.xlsx"))
+dat[tn == 25, flds := 0]  # count number without fields
+dat[tp == 0 & fp > 0, flds := 0]
+dat[tp > 0 | fn < 0, flds := 1]  # count number with fields
+
+# All sites
+sens <- dat[, sum(tp) / sum(tp, fn)] 
+spec <- dat[, sum(tn) / sum(fp, tn)] 
+acc <- dat[, sum(tp, tn) / sum(tp, fp, fn, tn)]
+tss <- sens + spec - 1
+
+# summary of tp, tn, fp, fn
+tptn <- dat[, lapply(.(tp, fp, fn, tn), sum)]
+setnames(tptn, toupper(colnames(dat)[2:5]))
+
+
+# With fields
+sensf <- dat[flds == 1, sum(tp) / sum(tp, fn)] 
+specf <- dat[flds == 1, sum(tn) / sum(fp, tn)] 
+accf <- dat[flds == 1, sum(tp, tn) / sum(tp, fp, fn, tn)]
+tssf <- sensf + specf - 1
+
+# Without fields
+sensnf <- 1
+specnf <- dat[flds == 0, sum(tn) / sum(fp, tn)] 
+accnf <- dat[flds == 0, sum(tp, tn) / sum(tp, fp, fn, tn)]
+tssnf <- sensnf + specnf - 1
+
+acctab <- rbind.data.frame("Sensitivity" = c(sens, sensf, sensnf), 
+                           "Specificity" = c(spec, specf, specnf), 
+                           "Accuracy" = c(acc, accf, accnf), 
+                           "TSS" = c(tss, tssf, tssnf))
+colnames(acctab) <- c("All", "Fields", "NoFields")
+acctab <- round(acctab, 2)
+```
+
+TP, FP, FN, TN
+```{r}
+tptn
+```
+
+Accuracy statistics
+```{r}
+acctab
+```
+
+\hyperlink{toc}{Back to top}
+
+# Mapping Rules
+
+The digitizing rules for the [Mapping Africa](http://mappingafrica.princeton.edu) were followed in the trial run. These are [illustrated](http://mappingafrica.princeton.edu/#mappingrules) in detail on the project website. The illustration for Rule 4 (below) captures the variability in the arable field class that workers were asked to map.
+
+
+![rule4](http://mappingafrica.princeton.edu/images/rule-1-pic-7.jpg)
+
+In the figure above, the red arrows indicate smallholder fields directly on the other side of the river from a commercial sugarcane field (tan arrows). In addition to being much smaller, the smallholder fields are less distinct at their edges, and contain remnant fruit trees, making them harder to distinguish from the surrounding vegetation. 
+
+\hyperlink{toc}{Back to top}
